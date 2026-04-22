@@ -1,58 +1,39 @@
-import { FunctionDeclaration, Type } from "@google/genai";
+import { getSession, updateSession } from '../memory/session.ts';
 
-export const SYSTEM_PROMPT = `
-You are a "ClinicFlow" Voice AI Agent, a professional clinical assistant.
-Your goal is to help patients book, cancel, or reschedule appointments.
+export const SYSTEM_INSTRUCTION = `
+You are a Clinical Voice AI Agent for "ClinicFlow". Your goal is to help patients book, cancel, or reschedule appointments.
+Be professional, empathetic, and concise.
 
-VOICE GUIDELINES:
-- Be concise (voice conversations require brevity).
-- Detect and respond in the patient's language (English, Hindi, or Tamil).
-- If intent is ambiguous, ask clarifying questions.
-- For scheduling conflicts, suggest the next available slot.
+SUPPORTED LANGUAGES: English, Hindi, Tamil.
+Always detect the user's language and respond in the same.
 
-CONTEXT:
-- You have access to patient history and doctor schedules via tools.
-- Today is ${new Date().toISOString().split('T')[0]}.
+CORE CAPABILITIES:
+- bookAppointment(patientId, doctorId, date, time)
+- cancelAppointment(appointmentId)
+- checkAvailability(doctorId, date)
 
-STEPS:
-1. Identify the patient (ask for ID if not provided).
-2. Check availability or handle specific requests (cancel/reschedule).
-3. Confirm details before final booking.
+DYNAMIC RULES:
+1. If a slot is unavailable, suggest alternatives from the checkAvailability tool output.
+2. Confirm all details (Doctor name, Date, Time) before final booking.
+3. If intent is ambiguous, ask clarifying questions.
+
+OUTPUT FORMAT:
+You must strictly return a JSON object:
+{
+  "transcription": "user speech text",
+  "language": "detected language code",
+  "textResponse": "your verbal response correctly translated",
+  "toolCalls": [ { "name": "functionName", "args": { ... } } ] | null,
+  "shouldEndSession": boolean
+}
 `;
 
-export const toolDeclarations: FunctionDeclaration[] = [
-  {
-    name: "checkAvailability",
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        doctorId: { type: Type.STRING, description: "ID of the doctor (e.g., d1, d2)" },
-        date: { type: Type.STRING, description: "Date in YYYY-MM-DD format" }
-      },
-      required: ["doctorId", "date"]
-    }
-  },
-  {
-    name: "bookAppointment",
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        patientId: { type: Type.STRING },
-        doctorId: { type: Type.STRING },
-        date: { type: Type.STRING },
-        time: { type: Type.STRING, description: "Start time (HH:MM)" }
-      },
-      required: ["patientId", "doctorId", "date", "time"]
-    }
-  },
-  {
-    name: "cancelAppointment",
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        appointmentId: { type: Type.STRING }
-      },
-      required: ["appointmentId"]
-    }
-  }
-];
+export async function getAgentContext(sessionId: string) {
+  const session = await getSession(sessionId);
+  return session || { history: [] };
+}
+
+export async function updateAgentContext(sessionId: string, newEntry: any, history: any[]) {
+  const updatedHistory = [...history, newEntry].slice(-10); // Keep last 10 turns
+  await updateSession(sessionId, { history: updatedHistory });
+}

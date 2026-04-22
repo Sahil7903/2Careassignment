@@ -1,41 +1,43 @@
-# ClinicFlow: Real-Time Multilingual Voice AI Agent
+# Serverless Real-Time Voice AI Architecture
 
-## 1. Executive Summary
-ClinicFlow is a production-grade voice conversational agent designed for high-concurrency clinical scheduling. It leverages a unified audio pipeline for state-of-the-art latency (<450ms) and handles complex multi-turn logic including slot conflict resolution and language switching.
+This system is designed for **stateless, low-latency execution** within Netlify's serverless environment. 
 
-## 2. Architecture Overview
-The system is built on a modular "Separation of Concerns" principle:
+## 1. Top-Level Architecture
 
-- **Orchestration Layer (Node.js)**: Manages bi-directional WebSocket streams, session lifecycle, and infrastructure logic.
-- **AI Agent Layer (Gemini Live API)**: Single-hop multimodal pipeline for STT, reasoning, and TTS.
-- **Memory Layer**:
-    - **Session (Memory)**: Voltatile state, history, and transient context with 30m TTL.
-    - **Persistent (SQLite)**: Durable storage for patient records, preferences, and doctor schedules.
-- **Tool Layer**: Encapsulated logic for database interactions (Checking slots, booking, cancelling).
+Unlike traditional long-lived WebSocket servers, this architecture uses an **Atomic Pipeline Pattern**. Every voice turn is treated as a discrete transaction.
 
-## 3. Data Flow
-1. **Audio Input**: 24kHz Mono PCM audio blocks streamed via WebSockets.
-2. **STT & Detection**: Gemini Live API processes stream; detects intent and language (English, Hindi, Tamil) concurrently.
-3. **Reasoning**: If a tool is needed (e.g., "Check Dr. Smith's schedule"), the agent emits a tool call.
-4. **Execution**: The backend executes the tool against the SQL store.
-5. **TTS Output**: Gemini generates synthesized audio with low-jitter parameters.
-6. **Streaming Back**: Audio chunks are pushed to the client for immediate playback.
+- **Frontend**: Handles Audio Recording -> Chunking -> Base64 Encoding -> HTTP POST.
+- **Backend (Netlify Functions)**: Orchestrates the AI pipeline.
+- **Memory (External)**: Uses Upstash Redis (REST) for multi-turn session state and PostgreSQL (Neon/Supabase) for ACID-compliant scheduling.
 
-## 4. Latency Performance (<450ms Design)
-| Stage | Target Latency | Optimization Strategy |
-|-------|----------------|-----------------------|
-| STT / Detect | 40ms | Integrated stream (no multi-hop REST) |
-| Agent Reasoning | 150ms | ThinkingLevel.LOW for speed, strict JSON schemas |
-| Tool Execution | 5ms | Pre-indexed SQLite / In-memory caches |
-| TTS Generation | 120ms | Continuous synthesis streaming |
-| **Total RTT** | **~315ms** | **Safe margin of 135ms to target** |
+## 2. The Atomic Pipeline
 
-## 5. Security & Persistence
-- **HIPAA Compliance**: Ready for data-at-rest encryption.
-- **Atomic Writes**: Uses database transactions to prevent double-bookings.
-- **Memory**: Session affinity ensures the agent doesn't lose context mid-call.
+To achieve the sub-450ms latency target in a serverless environment, we collapsed the STT and LLM layers:
 
-## 6. Known Limitations
-- Currently optimized for single-patient identification per session.
-- Outbound campaigns are triggered via crontab simulation (needs external trigger).
-- Direct PCM playback requires browser `AudioContext` support.
+1.  **Request Entry**: Function receives `audio` + `sessionId`.
+2.  **Context Injection**: Session history is fetched from Redis (cached per region).
+3.  **Unified Multimodal Reasoning**:
+    -   We pass the raw audio directly to **Gemini 1.5 Flash**.
+    -   Gemini performs STT, Language Detection, and Intent Extraction in a **single inference pass**.
+4.  **Tool Orchestration**: If a tool is requested (e.g., `bookAppointment`), the function executes the SQL query against the database.
+5.  **Voice Synthesis**: Resulting text is passed to **Gemini TTS** (optimized for speed).
+6.  **Response Exit**: Function returns the audio payload + transcription + metrics.
+
+## 3. Data Flow Diagram
+
+```mermaid
+graph LR
+    Client[Browser Audio] -->|HTTP POST| NF[Netlify Function]
+    NF -->|REST GET| Redis((Upstash Session))
+    NF -->|Multimodal| Gemini[Gemini 1.5 Flash]
+    Gemini -->|Tool Call| DB[(PostgreSQL)]
+    NF -->|Text| TTS[Gemini TTS]
+    TTS -->|Base64| Client
+```
+
+## 4. Latency Optimizations
+
+- **Single Pass Inference**: By using multimodal Gemini, we eliminate the 150-200ms overhead of a separate Whisper/Deepgram call.
+- **Serverless REST Redis**: Upstash's HTTP interface is faster than starting a fresh TCP connection for every function invocation.
+- **Parallel Synthesis**: (In advanced versions) We can begin tool execution and secondary reasoning concurrently if the intent is clear.
+- **Region Matching**: Deploy Netlify Functions in the same region as the database/Redis.
