@@ -8,8 +8,6 @@ A professional, real-time multilingual voice AI agent for clinical appointment b
    npm install
    npm run dev
    ```
-2. **Environment**:
-   - `GEMINI_API_KEY`: Required for the voice reasoning pipeline.
 
 ## System Components
 - `backend/api/websocket.ts`: WebSocket orchestration and metrics tracking.
