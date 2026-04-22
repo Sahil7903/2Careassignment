@@ -1,0 +1,6 @@
+{
+  "name": "ClinicFlow Voice AI",
+  "description": "Real-time multilingual voice AI agent for clinical appointment booking with <450ms latency, persistent memory, and tool-calling capabilities.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["Real-time Voice", "Multilingual Support", "Clinical Scheduling"]
+}
